@@ -1,0 +1,121 @@
+# .github/workflows/sync.yml
+
+name: Sync Fork, Build, and Push
+
+on:
+  # 1. 定时任务：每小时的第0分钟执行一次
+  schedule:
+    - cron: '0 * * * *'
+  
+  # 2. 手动触发：允许你在 Actions 页面手动运行此工作流程
+  workflow_dispatch:
+
+jobs:
+  sync-and-build:
+    # 使用最新的 Ubuntu 运行环境
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第 1 步：检出你的仓库代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # 获取所有历史记录，以便正确地进行合并比较
+          fetch-depth: 0
+
+      # 第 2 步：设置 Git 用户信息，用于推送代码
+      - name: Set up Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 第 3 步：添加上游仓库地址并拉取最新代码
+      - name: Add upstream remote and fetch
+        run: |
+          # 添加原始仓库作为名为 "upstream" 的远程仓库
+          git remote add upstream https://github.com/su-kaka/gcli2api.git
+          # 从 upstream 拉取最新的代码信息
+          git fetch upstream
+
+      # 第 4 步：检查是否有更新并合并
+      - name: Check for updates and merge
+        id: sync
+        run: |
+          # 获取合并前的 main 分支的 commit hash
+          BEFORE=$(git rev-parse main)
+          
+          # 尝试以 "fast-forward only" 模式合并上游的 main 分支
+          # 这种模式可以保证历史记录是线性的，不会产生额外的合并 commit
+          # `|| true` 确保在没有新内容或无法 fast-forward 时工作流不会失败
+          git merge upstream/main --ff-only || true
+          
+          # 获取合并后的 main 分支的 commit hash
+          AFTER=$(git rev-parse main)
+          
+          # 比较前后的 hash，如果不相同，则说明有更新
+          if [ "$BEFORE" != "$AFTER" ]; then
+            # 如果有更新，设置输出变量 has_updates 为 true
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "Changes detected from upstream."
+          else
+            # 如果没有更新，设置输出变量 has_updates 为 false
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "No new changes from upstream."
+          fi
+
+      # 第 5 步：如果检测到更新，则将代码推送到你的 Fork 仓库
+      - name: Push updated code to fork
+        # 使用 if 条件判断，只有在上一步的输出 has_updates 为 true 时才执行
+        if: steps.sync.outputs.has_updates == 'true'
+        run: git push origin main
+
+      # --- 只有在有代码更新时，才会执行以下所有步骤 ---
+
+      # 第 6 步：准备 Docker 镜像的标签
+      - name: Prepare image tags
+        if: steps.sync.outputs.has_updates == 'true'
+        id: prep_tags
+        run: |
+          # 按照你的要求，将 Docker Hub 用户名转换为小写
+          LOWERCASE_USERNAME=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')
+          
+          # 使用仓库名作为镜像名，你可以根据需要修改 "gcli2api"
+          IMAGE_NAME="gcli2api"
+          
+          # 将完整的镜像标签（例如：your-lower-case-user/gcli2api:latest）设置为输出变量
+          echo "tags=${LOWERCASE_USERNAME}/${IMAGE_NAME}:latest" >> $GITHUB_OUTPUT
+
+      # 第 7 步：设置 Docker Buildx，这是 build-push-action 的一个依赖
+      - name: Set up Docker Buildx
+        if: steps.sync.outputs.has_updates == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # 第 8 步：登录到 Docker Hub
+      - name: Log in to Docker Hub
+        if: steps.sync.outputs.has_updates == 'true'
+        uses: docker/login-action@v3
+        with:
+          # 使用你存储在 GitHub Secrets 中的用户名和 Token
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 第 9 步：构建并推送 Docker 镜像
+      - name: Build and push Docker image
+        if: steps.sync.outputs.has_updates == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          # Dockerfile 的上下文路径，. 表示仓库根目录
+          context: .
+          # 设置为 true，表示要推送到镜像仓库
+          push: true
+          # 使用第 6 步准备好的镜像标签
+          tags: ${{ steps.prep_tags.outputs.tags }}
+          
+      # 第 10 步：输出工作流执行摘要
+      - name: Summary
+        run: |
+          if [ "${{ steps.sync.outputs.has_updates }}" == "true" ]; then
+            echo "✅ Workflow completed: Fork synced, image built, and pushed to Docker Hub."
+          else
+            echo "☑️ Workflow completed: No updates from upstream. Nothing to do."
+          fi
