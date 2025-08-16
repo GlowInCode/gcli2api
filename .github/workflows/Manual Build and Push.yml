@@ -1,7 +1,7 @@
 # .github/workflows/manual-build.yml
 
 # 工作流名称
-name: Manual Build and Push
+name: Manual Build and Push to GHCR
 
 on:
   # 仅保留手动触发：允许你在 Actions 页面手动运行此工作流程
@@ -11,38 +11,45 @@ jobs:
   # --- 手动构建并推送 ---
   build_and_push:
     # 工作名称
-    name: 构建并推送到 Docker Hub
+    name: 构建并推送到 GitHub Container Registry
     # 运行环境
     runs-on: ubuntu-latest
+    # 设置推送到 ghcr.io 所需的权限
+    permissions:
+      contents: read
+      packages: write
+      
     steps:
       # 第 1 步：检出你的仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 第 2 步：准备 Docker 镜像的标签
+      # 第 2 步：登录到 GitHub Container Registry (ghcr.io)
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # github.actor 是触发工作流的用户名
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN 是由 GitHub Actions 自动生成的，用于认证
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 第 3 步：准备 Docker 镜像的元数据和标签
       - name: Prepare image tags
         id: prep_tags
         run: |
-          # 按照你的要求，将 Docker Hub 用户名转换为小写
-          LOWERCASE_USERNAME=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')
+          # 将仓库所有者（你的用户名）转换为小写
+          LOWERCASE_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           
           # 使用仓库名作为镜像名，你可以根据需要修改 "gcli2api"
           IMAGE_NAME="gcli2api"
           
-          # 将完整的镜像标签（例如：your-lower-case-user/gcli2api:latest）设置为输出变量
-          echo "tags=${LOWERCASE_USERNAME}/${IMAGE_NAME}:latest" >> $GITHUB_OUTPUT
+          # 将完整的镜像标签设置为输出变量，格式为 ghcr.io/owner/image:latest
+          echo "tags=ghcr.io/${LOWERCASE_OWNER}/${IMAGE_NAME}:latest" >> $GITHUB_OUTPUT
 
-      # 第 3 步：设置 Docker Buildx
+      # 第 4 步：设置 Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      # 第 4 步：登录到 Docker Hub
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          # 使用你存储在 GitHub Secrets 中的用户名和 Token
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # 第 5 步：构建并推送 Docker 镜像
       - name: Build and push Docker image
@@ -52,9 +59,9 @@ jobs:
           context: .
           # 设置为 true，表示要推送到镜像仓库
           push: true
-          # 使用第 2 步准备好的镜像标签
+          # 使用第 3 步准备好的镜像标签
           tags: ${{ steps.prep_tags.outputs.tags }}
           
       # 第 6 步：输出工作流执行摘要
       - name: Summary
-        run: echo "✅ 手动触发完成：镜像已成功构建并推送到 Docker Hub。"
+        run: echo "✅ 手动触发完成：镜像已成功构建并推送到 ghcr.io。"
