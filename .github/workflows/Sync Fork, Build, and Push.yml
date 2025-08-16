@@ -3,11 +3,11 @@
 name: Sync, Build, and Push to GHCR
 
 on:
-  # 仅保留定时任务：每小时的第0分钟执行一次
+  # 1. 定时任务：每小时的第0分钟执行一次
   schedule:
     - cron: '0 * * * *'
   
-  # 你仍然可以保留手动触发，它会运行下面的定时任务逻辑
+  # 2. 你仍然可以保留手动触发，它会运行下面的定时任务逻辑
   workflow_dispatch:
 
 jobs:
@@ -15,39 +15,47 @@ jobs:
   sync_and_build_if_updated:
     name: 同步并按需构建
     runs-on: ubuntu-latest
-    # 设置推送到 ghcr.io 所需的权限
+    # 设置 GITHUB_TOKEN 所需的权限
     permissions:
-      contents: write # 需要 write 权限来推送更新
-      packages: write
+      contents: write # 授予 GITHUB_TOKEN 推送代码的权限
+      packages: write # 授予 GITHUB_TOKEN 推送镜像的权限
     steps:
+      # 第 1 步：检出你的仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 需要一个有推送权限的 token
-          token: ${{ secrets.PAT_TOKEN }}
+          # 使用 GITHUB_TOKEN，它由 permissions 块授予推送权限
+          # 这样就无需手动设置 PAT_TOKEN 了
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      # 第 2 步：设置 Git 用户信息
       - name: Set up Git user
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # 第 3 步：添加上游仓库并拉取
       - name: Add upstream remote and fetch
         run: |
           git remote add upstream https://github.com/su-kaka/gcli2api.git
           git fetch upstream
 
+      # 第 4 步：检查更新并合并
       - name: Check for updates and merge
         id: sync
         run: |
-          # 假设你的默认分支是 main，如果不是请修改
-          BRANCH="master"
-          # 切换到你的分支
+          # 动态获取仓库的默认分支 (例如 main 或 master)
+          BRANCH=${{ github.event.repository.default_branch }}
+          
+          # 确保我们就在这个分支上
           git checkout $BRANCH
+          
           BEFORE=$(git rev-parse $BRANCH)
-          # 合并上游分支
+          # 合并上游的同名分支
           git merge upstream/$BRANCH --ff-only || true
           AFTER=$(git rev-parse $BRANCH)
+          
           if [ "$BEFORE" != "$AFTER" ]; then
             echo "has_updates=true" >> $GITHUB_OUTPUT
             echo "检测到上游更新。"
@@ -56,10 +64,12 @@ jobs:
             echo "上游无新变化。"
           fi
 
+      # 第 5 步：推送更新到你的 Fork 仓库
       - name: Push updated code to fork
         if: steps.sync.outputs.has_updates == 'true'
-        run: git push origin main
+        run: git push origin ${{ github.event.repository.default_branch }}
 
+      # 第 6 步：登录到 GitHub Container Registry
       - name: Log in to GitHub Container Registry
         if: steps.sync.outputs.has_updates == 'true'
         uses: docker/login-action@v3
@@ -68,6 +78,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 第 7 步：准备 Docker 镜像标签
       - name: Prepare image tags
         if: steps.sync.outputs.has_updates == 'true'
         id: prep_tags
@@ -76,10 +87,12 @@ jobs:
           IMAGE_NAME="gcli2api"
           echo "tags=ghcr.io/${LOWERCASE_OWNER}/${IMAGE_NAME}:latest" >> $GITHUB_OUTPUT
 
+      # 第 8 步：设置 Docker Buildx
       - name: Set up Docker Buildx
         if: steps.sync.outputs.has_updates == 'true'
         uses: docker/setup-buildx-action@v3
 
+      # 第 9 步：构建并推送 Docker 镜像
       - name: Build and push Docker image
         if: steps.sync.outputs.has_updates == 'true'
         uses: docker/build-push-action@v5
@@ -88,6 +101,7 @@ jobs:
           push: true
           tags: ${{ steps.prep_tags.outputs.tags }}
           
+      # 第 10 步：输出摘要
       - name: Summary
         run: |
           if [ "${{ steps.sync.outputs.has_updates }}" == "true" ]; then
