@@ -56,11 +56,11 @@ jobs:
           if [ "$BEFORE" != "$AFTER" ]; then
             # 如果有更新，设置输出变量 has_updates 为 true
             echo "has_updates=true" >> $GITHUB_OUTPUT
-            echo "Changes detected from upstream."
+            echo "检测到上游更新。"
           else
             # 如果没有更新，设置输出变量 has_updates 为 false
             echo "has_updates=false" >> $GITHUB_OUTPUT
-            echo "No new changes from upstream."
+            echo "上游无新变化。"
           fi
 
       # 第 5 步：如果检测到更新，则将代码推送到你的 Fork 仓库
@@ -115,7 +115,7 @@ jobs:
       - name: Summary
         run: |
           if [ "${{ steps.sync.outputs.has_updates }}" == "true" ]; then
-            echo "✅ Workflow completed: Fork synced, image built, and pushed to Docker Hub."
+            echo "✅ 工作流完成：已同步 Fork，镜像已构建并推送到 Docker Hub。"
           else
-            echo "☑️ Workflow completed: No updates from upstream. Nothing to do."
+            echo "☑️ 工作流完成：上游无更新，无需任何操作。"
           fi
