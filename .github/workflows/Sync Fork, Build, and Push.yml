@@ -20,6 +20,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # 明确指定检出触发工作流的分支（例如 main 或 master）
+          ref: ${{ github.ref_name }}
           # 获取所有历史记录，以便正确地进行合并比较
           fetch-depth: 0
 
@@ -41,16 +43,18 @@ jobs:
       - name: Check for updates and merge
         id: sync
         run: |
-          # 获取合并前的 main 分支的 commit hash
-          BEFORE=$(git rev-parse main)
+          # 动态获取当前分支的名称
+          BRANCH=${{ github.ref_name }}
           
-          # 尝试以 "fast-forward only" 模式合并上游的 main 分支
-          # 这种模式可以保证历史记录是线性的，不会产生额外的合并 commit
+          # 获取合并前的 commit hash
+          BEFORE=$(git rev-parse $BRANCH)
+          
+          # 尝试以 "fast-forward only" 模式合并上游的同名分支
           # `|| true` 确保在没有新内容或无法 fast-forward 时工作流不会失败
-          git merge upstream/main --ff-only || true
+          git merge upstream/$BRANCH --ff-only || true
           
-          # 获取合并后的 main 分支的 commit hash
-          AFTER=$(git rev-parse main)
+          # 获取合并后的 commit hash
+          AFTER=$(git rev-parse $BRANCH)
           
           # 比较前后的 hash，如果不相同，则说明有更新
           if [ "$BEFORE" != "$AFTER" ]; then
@@ -67,7 +71,7 @@ jobs:
       - name: Push updated code to fork
         # 使用 if 条件判断，只有在上一步的输出 has_updates 为 true 时才执行
         if: steps.sync.outputs.has_updates == 'true'
-        run: git push origin main
+        run: git push origin ${{ github.ref_name }}
 
       # --- 只有在有代码更新时，才会执行以下所有步骤 ---
 
