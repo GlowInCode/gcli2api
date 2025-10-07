@@ -66,6 +66,7 @@ venv.bak/
 # IDE
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
@@ -81,3 +82,5 @@ Thumbs.db
 
 # Logs
 *.log
+log.txt
+*.txt
